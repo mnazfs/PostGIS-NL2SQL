@@ -1,8 +1,48 @@
 import re
+import json
 from typing import Dict, Any, Optional
 
 class ResponseParser:
     """Parse and clean responses from LLM"""
+    
+    @staticmethod
+    def extract_json_from_response(raw_text: str) -> dict:
+        """
+        Extract and parse JSON from LLM response
+        
+        Args:
+            raw_text: Raw LLM response text
+            
+        Returns:
+            Parsed JSON dictionary
+            
+        Raises:
+            Exception: If JSON extraction or parsing fails
+        """
+        try:
+            # Remove markdown code blocks
+            cleaned = re.sub(r'```json\s*', '', raw_text, flags=re.IGNORECASE)
+            cleaned = re.sub(r'```\s*', '', cleaned)
+            
+            # Try to find JSON block (between { and })
+            match = re.search(r'\{.*\}', cleaned, flags=re.DOTALL)
+            if match:
+                json_str = match.group(0)
+            else:
+                json_str = cleaned.strip()
+            
+            # Parse JSON strictly
+            parsed = json.loads(json_str)
+            
+            if not isinstance(parsed, dict):
+                raise Exception("Extracted JSON is not a dictionary")
+            
+            return parsed
+            
+        except json.JSONDecodeError as e:
+            raise Exception(f"Failed to parse JSON: {str(e)}")
+        except Exception as e:
+            raise Exception(f"Failed to extract JSON from response: {str(e)}")
     
     @staticmethod
     def parse_sql_response(response: str) -> str:

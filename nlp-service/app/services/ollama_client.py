@@ -1,13 +1,46 @@
 import requests
 from typing import Optional, Dict, Any
-from app.config import settings
+from app import config
+
+def call_ollama(prompt: str) -> dict:
+    """
+    Call Ollama API to generate text
+    
+    Args:
+        prompt: The input prompt
+        
+    Returns:
+        JSON response from Ollama
+        
+    Raises:
+        Exception: If Ollama request fails
+    """
+    try:
+        url = f"{config.OLLAMA_URL}/api/generate"
+        
+        body = {
+            "model": config.OLLAMA_MODEL,
+            "prompt": prompt,
+            "temperature": config.TEMPERATURE,
+            "stream": False
+        }
+        
+        response = requests.post(url, json=body, timeout=60)
+        response.raise_for_status()
+        
+        return response.json()
+        
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Ollama request failed: {str(e)}")
+    except Exception as e:
+        raise Exception(f"Unexpected error calling Ollama: {str(e)}")
 
 class OllamaClient:
     """Client for interacting with Ollama API"""
     
     def __init__(self):
-        self.base_url = settings.OLLAMA_BASE_URL
-        self.model = settings.OLLAMA_MODEL
+        self.base_url = config.OLLAMA_URL
+        self.model = config.OLLAMA_MODEL
     
     def generate(
         self,

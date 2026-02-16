@@ -1,68 +1,64 @@
 from typing import Dict, Any
-from app.services.ollama_client import OllamaClient
-from app.services.prompt_builder import PromptBuilder
+from app.services.ollama_client import call_ollama
+from app.services.prompt_builder import (
+    build_planning_prompt,
+    build_refinement_prompt,
+    build_formatting_prompt
+)
 from app.services.response_parser import ResponseParser
 
-class ModeHandler:
-    """Handle different generation modes"""
+def handle_mode(mode: str, payload: dict) -> dict:
+    """
+    Handle generation request based on mode
     
-    def __init__(self):
-        self.ollama_client = OllamaClient()
-        self.prompt_builder = PromptBuilder()
-        self.response_parser = ResponseParser()
+    Args:
+        mode: Generation mode (planning, refinement, formatting)
+        payload: Request payload containing input and context
+        
+    Returns:
+        Dictionary with mode-specific response
+        
+    Raises:
+        Exception: If mode is unknown or processing fails
+    """
+    if mode == "planning":
+        query = payload.get("query", "")
+        schema = payload.get("schema", "")
+        
+        prompt = build_planning_prompt(query, schema)
+        response = call_ollama(prompt)
+        
+        raw_text = response.get("response", "")
+        parsed = ResponseParser.extract_json_from_response(raw_text)
+        
+        return parsed
     
-    def handle(
-        self,
-        user_input: str,
-        mode: str,
-        context: Dict[str, Any],
-        temperature: float = 0.7,
-        max_tokens: int = 1000
-    ) -> Dict[str, Any]:
-        """
-        Handle generation request based on mode
+    elif mode == "refinement":
+        original_query = payload.get("original_query", "")
+        execution_results = payload.get("execution_results", {})
         
-        Args:
-            user_input: User's input text
-            mode: Generation mode
-            context: Additional context
-            temperature: Generation temperature
-            max_tokens: Maximum tokens
-            
-        Returns:
-            Dictionary containing result and metadata
-        """
-        # Build prompt
-        prompt = self.prompt_builder.build_prompt(user_input, mode, context)
+        prompt = build_refinement_prompt(original_query, execution_results)
+        response = call_ollama(prompt)
         
-        # Generate response
-        ollama_response = self.ollama_client.generate(
-            prompt=prompt,
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
+        raw_text = response.get("response", "")
+        parsed = ResponseParser.extract_json_from_response(raw_text)
         
-        if not ollama_response.get("success"):
-            return {
-                "success": False,
-                "error": ollama_response.get("error", "Generation failed")
-            }
+        return parsed
+    
+    elif mode == "formatting":
+        original_query = payload.get("query", "")
+        final_data = payload.get("final_data", {})
         
-        raw_response = ollama_response.get("response", "")
+        prompt = build_formatting_prompt(original_query, final_data)
+        response = call_ollama(prompt)
         
-        # Parse response based on mode
-        if mode == "sql_generation":
-            parsed = self.response_parser.parse_sql_response(raw_response)
-        else:
-            parsed = self.response_parser.parse_general_response(raw_response)
-        
-        # Extract metadata
-        metadata = self.response_parser.extract_metadata(raw_response, mode)
-        metadata["model"] = ollama_response.get("model")
+        raw_text = response.get("response", "")
+        parsed = ResponseParser.extract_json_from_response(raw_text)
         
         return {
-            "success": True,
-            "result": parsed,
-            "mode": mode,
-            "metadata": metadata
+            "summary": parsed.get("summary", "")
         }
+    
+    else:
+        raise Exception(f"Unknown mode: {mode}")
+

@@ -1,8 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import generate
-from app.config import settings
-from app.services.ollama_client import OllamaClient
+from app import config
 
 app = FastAPI(
     title="NLP Service",
@@ -20,34 +19,21 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(generate.router, prefix=settings.API_PREFIX, tags=["generate"])
-
-@app.get("/")
-async def root():
-    """Root endpoint"""
-    return {
-        "service": "NLP Service",
-        "status": "running",
-        "version": "1.0.0"
-    }
+app.include_router(generate.router, prefix="/api", tags=["generate"])
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    ollama_client = OllamaClient()
-    ollama_healthy = ollama_client.health_check()
-    
     return {
-        "status": "healthy" if ollama_healthy else "degraded",
-        "ollama_connected": ollama_healthy,
-        "service": "running"
+        "success": True,
+        "message": "NLP service healthy"
     }
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
         "app.main:app",
-        host=settings.SERVICE_HOST,
-        port=settings.SERVICE_PORT,
+        host="0.0.0.0",
+        port=config.PORT,
         reload=True
     )
