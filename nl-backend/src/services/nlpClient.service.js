@@ -1,5 +1,3 @@
-import axios from 'axios';
-
 /**
  * NLP Client Service
  * 
@@ -14,7 +12,7 @@ import axios from 'axios';
  * @returns {Promise<any>} The response data from the NLP service
  * @throws {Error} If the request fails
  */
-async function callNLPService(mode, payload) {
+async function callNLP(mode, payload) {
   try {
     const nlpServiceUrl = process.env.NLP_SERVICE_URL;
     
@@ -22,46 +20,52 @@ async function callNLPService(mode, payload) {
       throw new Error('NLP_SERVICE_URL is not configured in environment variables');
     }
     
-    const endpoint = `${nlpServiceUrl}/generate`;
+    const endpoint = `${nlpServiceUrl}/api/generate`;
     
     console.log(`Calling NLP service: ${endpoint} with mode: ${mode}`);
     
-    const response = await axios.post(endpoint, {
-      mode: mode,
-      payload: payload
-    }, {
+    const response = await fetch(endpoint, {
+      method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      timeout: 30000 // 30 second timeout
+      body: JSON.stringify({
+        mode,
+        payload
+      })
     });
+    
+    // Check if the HTTP response was successful
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        `NLP service returned error ${response.status}: ${errorText}`
+      );
+    }
+    
+    const data = await response.json();
+    
+    // Check if the response indicates success
+    if (data.success === false) {
+      throw new Error(data.message || 'NLP service returned success=false');
+    }
     
     console.log(`✓ NLP service responded successfully`);
     
-    return response.data;
+    return data.data;
     
   } catch (error) {
-    // Handle different types of errors cleanly
-    if (error.code === 'ECONNREFUSED') {
+    // Handle fetch-specific errors
+    if (error.cause?.code === 'ECONNREFUSED' || error.message.includes('fetch failed')) {
       throw new Error(
         `Unable to connect to NLP service at ${process.env.NLP_SERVICE_URL}. ` +
         `Please ensure the service is running.`
       );
     }
     
-    if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
-      throw new Error(
-        `NLP service request timed out. The service may be overloaded or unresponsive.`
-      );
-    }
-    
-    if (error.response) {
-      // Server responded with error status
-      const status = error.response.status;
-      const message = error.response.data?.message || error.response.statusText;
-      throw new Error(
-        `NLP service returned error ${status}: ${message}`
-      );
+    // Re-throw if it's already a formatted error
+    if (error.message.includes('NLP service')) {
+      throw error;
     }
     
     // Generic error
@@ -70,4 +74,4 @@ async function callNLPService(mode, payload) {
   }
 }
 
-export { callNLPService };
+export { callNLP };

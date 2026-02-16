@@ -7,16 +7,50 @@
 /**
  * Validate SQL query with strict security checks
  * 
- * @param {string} sql - The SQL query to validate
+ * @param {string|string[]} sql - The SQL query or array of queries to validate
  * @param {object} schemaCache - The schema cache object from schemaCache service
  * @returns {object} { valid: true } or { valid: false, reason: "..." }
  */
 function validateSQL(sql, schemaCache) {
+  // Handle array of SQL queries
+  if (Array.isArray(sql)) {
+    for (let i = 0; i < sql.length; i++) {
+      const result = validateSingleSQL(sql[i], schemaCache);
+      if (!result.valid) {
+        return {
+          valid: false,
+          reason: `Query ${i + 1}: ${result.reason}`
+        };
+      }
+    }
+    return { valid: true };
+  }
+  
+  // Single SQL query
+  return validateSingleSQL(sql, schemaCache);
+}
+
+/**
+ * Validate a single SQL query with strict security checks
+ * 
+ * @param {string} sql - The SQL query to validate
+ * @param {object} schemaCache - The schema cache object from schemaCache service
+ * @returns {object} { valid: true } or { valid: false, reason: "..." }
+ */
+function validateSingleSQL(sql, schemaCache) {
   // Normalize SQL (trim and handle whitespace)
   const normalizedSQL = sql.trim().replace(/\s+/g, ' ');
   const upperSQL = normalizedSQL.toUpperCase();
   
-  // 1. Ensure query starts with SELECT
+  // 1. Check for semicolons (prevent multiple statements)
+  if (normalizedSQL.includes(';')) {
+    return {
+      valid: false,
+      reason: 'Semicolons are not allowed. Each query must be submitted separately.'
+    };
+  }
+  
+  // 2. Ensure query starts with SELECT
   if (!upperSQL.startsWith('SELECT')) {
     return {
       valid: false,
@@ -24,7 +58,7 @@ function validateSQL(sql, schemaCache) {
     };
   }
   
-  // 2. Reject dangerous keywords
+  // 3. Reject dangerous keywords
   const dangerousKeywords = [
     'INSERT', 'UPDATE', 'DELETE', 'DROP', 'ALTER', 
     'CREATE', 'TRUNCATE', 'GRANT', 'REVOKE', 'EXEC',
@@ -42,7 +76,7 @@ function validateSQL(sql, schemaCache) {
     }
   }
   
-  // 3. Ensure LIMIT clause exists
+  // 4. Ensure LIMIT clause exists
   const hasLimit = /\bLIMIT\s+\d+/i.test(normalizedSQL);
   if (!hasLimit) {
     return {
@@ -51,7 +85,7 @@ function validateSQL(sql, schemaCache) {
     };
   }
   
-  // 4. Ensure referenced tables exist in schema cache
+  // 5. Ensure referenced tables exist in schema cache
   if (!schemaCache || !schemaCache.tables) {
     return {
       valid: false,

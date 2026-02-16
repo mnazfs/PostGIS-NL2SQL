@@ -1,7 +1,8 @@
 import { getSchemaCache, getSchemaDescription } from './schemaCache.service.js';
-import { callNLPService } from './nlpClient.service.js';
+import { callNLP } from './nlpClient.service.js';
 import { validateSQL } from './sqlValidator.service.js';
 import { executeSQL } from './sqlExecutor.service.js';
+import { extractGeoJSON } from '../utils/queryHelpers.js';
 
 /**
  * Agent Orchestrator Service
@@ -35,12 +36,17 @@ async function handleUserQuery(userQuery) {
     
     // Step 2: Call NLP service with mode "planning"
     console.log('\n🤖 Step 2: Calling NLP service for query planning...');
-    const planningResponse = await callNLPService('planning', {
+    const planningResponse = await callNLP('planning', {
       query: userQuery,
       schema: schemaDescription
     });
     
-    console.log('✓ Planning response received');
+    console.log('\n' + '═'.repeat(80));
+    console.log('📋 PLANNING RESPONSE');
+    console.log('═'.repeat(80));
+    console.log(JSON.stringify(planningResponse, null, 2));
+    console.log('═'.repeat(80));
+    
     const { sql: plannedSQL, requires_second_phase } = planningResponse;
     
     if (!plannedSQL) {
@@ -49,7 +55,15 @@ async function handleUserQuery(userQuery) {
     
     console.log('\n📝 PHASE 1 SQL:');
     console.log('─'.repeat(80));
-    console.log(plannedSQL);
+    if (Array.isArray(plannedSQL)) {
+      plannedSQL.forEach((query, index) => {
+        console.log(`Query ${index + 1}:`);
+        console.log(query);
+        if (index < plannedSQL.length - 1) console.log('');
+      });
+    } else {
+      console.log(plannedSQL);
+    }
     console.log('─'.repeat(80));
     console.log(`Requires second phase: ${requires_second_phase}`);
     
@@ -68,10 +82,10 @@ async function handleUserQuery(userQuery) {
       return {
         success: false,
         error: 'SQL Validation Failed',
-        reason: validation.reason,
-        sql: plannedSQL,
-        phase: 'validation',
-        execution_time_ms: executionTime
+        message: validation.reason,
+        summary: `Unable to validate the SQL query: ${validation.reason}`,
+        rows: [],
+        geojson: null
       };
     }
     
@@ -85,8 +99,16 @@ async function handleUserQuery(userQuery) {
     let finalSQL = plannedSQL;
     let refinementApplied = false;
     
-    console.log(`✓ Phase 1 execution completed: ${executionResult.length} rows returned`);
-    console.log(`⏱️  Phase 1 execution time: ${phase1ExecutionTime}ms`);
+    console.log('\n' + '═'.repeat(80));
+    console.log('📊 SQL EXECUTION RESULTS (PHASE 1)');
+    console.log('═'.repeat(80));
+    console.log(`Rows returned: ${executionResult.length}`);
+    console.log(`Execution time: ${phase1ExecutionTime}ms`);
+    if (executionResult.length > 0) {
+      console.log('\nSample data (first row):');
+      console.log(JSON.stringify(executionResult[0], null, 2));
+    }
+    console.log('═'.repeat(80));
     
     // Step 5: Check if refinement is needed
     const needsRefinement = requires_second_phase || executionResult.length === 0;
@@ -96,20 +118,31 @@ async function handleUserQuery(userQuery) {
       console.log(`Reason: ${requires_second_phase ? 'Second phase required' : 'Empty result set'}`);
       
       try {
-        const refinementResponse = await callNLPService('refinement', {
-          query: userQuery,
-          schema: schemaDescription,
-          previous_sql: plannedSQL,
-          previous_result: executionResult,
-          reason: requires_second_phase ? 'second_phase' : 'empty_result'
+        const refinementResponse = await callNLP('refinement', {
+          original_query: userQuery,
+          execution_results: executionResult
         });
+        
+        console.log('\n' + '═'.repeat(80));
+        console.log('🔄 REFINEMENT RESPONSE');
+        console.log('═'.repeat(80));
+        console.log(JSON.stringify(refinementResponse, null, 2));
+        console.log('═'.repeat(80));
         
         const refinedSQL = refinementResponse.sql;
         
         if (refinedSQL) {
           console.log('\n📝 PHASE 2 SQL:');
           console.log('─'.repeat(80));
-          console.log(refinedSQL);
+          if (Array.isArray(refinedSQL)) {
+            refinedSQL.forEach((query, index) => {
+              console.log(`Query ${index + 1}:`);
+              console.log(query);
+              if (index < refinedSQL.length - 1) console.log('');
+            });
+          } else {
+            console.log(refinedSQL);
+          }
           console.log('─'.repeat(80));
           
           // Validate refined SQL
@@ -127,8 +160,16 @@ async function handleUserQuery(userQuery) {
             finalSQL = refinedSQL;
             refinementApplied = true;
             
-            console.log(`✓ Phase 2 execution completed: ${executionResult.length} rows returned`);
-            console.log(`⏱️  Phase 2 execution time: ${phase2ExecutionTime}ms`);
+            console.log('\n' + '═'.repeat(80));
+            console.log('📊 SQL EXECUTION RESULTS (PHASE 2)');
+            console.log('═'.repeat(80));
+            console.log(`Rows returned: ${executionResult.length}`);
+            console.log(`Execution time: ${phase2ExecutionTime}ms`);
+            if (executionResult.length > 0) {
+              console.log('\nSample data (first row):');
+              console.log(JSON.stringify(executionResult[0], null, 2));
+            }
+            console.log('═'.repeat(80));
           } else {
             console.error('\n❌ VALIDATION FAILED (Phase 2):');
             console.error(`Reason: ${refinedValidation.reason}`);
@@ -147,38 +188,38 @@ async function handleUserQuery(userQuery) {
     let formattedResponse;
     
     try {
-      const formattingResponse = await callNLPService('formatting', {
-        query: userQuery,
-        sql: finalSQL,
-        result_count: executionResult.length,
-        sample_data: executionResult.slice(0, 3) // Send first 3 rows as sample
+      const formattingResponse = await callNLP('formatting', {
+        original_query: userQuery,
+        final_data: executionResult
       });
       
-      formattedResponse = formattingResponse.formatted_text || formattingResponse.response;
-      console.log('✓ Response formatted');
+      console.log('\n' + '═'.repeat(80));
+      console.log('✨ FORMATTING RESPONSE');
+      console.log('═'.repeat(80));
+      console.log(JSON.stringify(formattingResponse, null, 2));
+      console.log('═'.repeat(80));
+      
+      formattedResponse = formattingResponse.formatted_text || formattingResponse.response || formattingResponse.summary;
+      console.log('\n✓ Response formatted successfully');
       
     } catch (formattingError) {
       console.log('⚠️  Formatting failed, using default message');
       formattedResponse = `Found ${executionResult.length} result(s) for your query.`;
     }
     
-    // Step 7: Return final structured response
+    // Step 7: Extract GeoJSON if available
+    const geojson = extractGeoJSON(executionResult);
+    
+    // Step 8: Return final structured response
     const totalExecutionTime = Date.now() - startTime;
     console.log('\n✨ Query processing complete!');
     console.log(`⏱️  Total execution time: ${totalExecutionTime}ms\n`);
     
     return {
       success: true,
-      query: userQuery,
-      sql: finalSQL,
-      response: formattedResponse,
-      data: executionResult,
-      metadata: {
-        row_count: executionResult.length,
-        refinement_applied: refinementApplied,
-        requires_second_phase: requires_second_phase,
-        execution_time_ms: totalExecutionTime
-      }
+      summary: formattedResponse,
+      rows: executionResult,
+      geojson: geojson
     };
     
   } catch (error) {
@@ -192,29 +233,11 @@ async function handleUserQuery(userQuery) {
       success: false,
       error: error.name || 'QueryProcessingError',
       message: error.message,
-      query: userQuery,
-      phase: determineErrorPhase(error),
-      execution_time_ms: totalExecutionTime
+      summary: `An error occurred while processing your query: ${error.message}`,
+      rows: [],
+      geojson: null
     };
   }
-}
-
-/**
- * Determine which phase the error occurred in based on the error message
- * 
- * @param {Error} error - The error object
- * @returns {string} The phase name
- */
-function determineErrorPhase(error) {
-  const message = error.message.toLowerCase();
-  
-  if (message.includes('schema')) return 'schema_loading';
-  if (message.includes('nlp') || message.includes('service')) return 'nlp_service';
-  if (message.includes('validation')) return 'validation';
-  if (message.includes('execution') || message.includes('timeout')) return 'execution';
-  if (message.includes('formatting')) return 'formatting';
-  
-  return 'unknown';
 }
 
 export { handleUserQuery };

@@ -5,13 +5,30 @@ dotenv.config();
 
 const { Pool } = pg;
 
+// Configuration
+export const config = {
+  // Database configuration
+  db: {
+    host: process.env.DB_HOST || 'localhost',
+    port: process.env.DB_PORT || 5432,
+    database: process.env.DB_NAME,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+  },
+  // NLP Service configuration
+  nlpServiceUrl: process.env.NLP_SERVICE_URL || 'http://localhost:8000',
+  // Query configuration
+  maxRows: parseInt(process.env.MAX_ROWS) || 50,
+  statementTimeout: parseInt(process.env.STATEMENT_TIMEOUT) || 5000,
+};
+
 // Create a connection pool
 const pool = new Pool({
-  host: process.env.DB_HOST || 'localhost',
-  port: process.env.DB_PORT || 5432,
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
+  host: config.db.host,
+  port: config.db.port,
+  database: config.db.database,
+  user: config.db.user,
+  password: config.db.password,
   max: 20, // Maximum number of clients in the pool
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
