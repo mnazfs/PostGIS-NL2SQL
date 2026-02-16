@@ -1,0 +1,66 @@
+import re
+from typing import Dict, Any, Optional
+
+class ResponseParser:
+    """Parse and clean responses from LLM"""
+    
+    @staticmethod
+    def parse_sql_response(response: str) -> str:
+        """
+        Extract SQL query from LLM response
+        
+        Args:
+            response: Raw LLM response
+            
+        Returns:
+            Cleaned SQL query
+        """
+        # Remove markdown code blocks
+        sql = re.sub(r'```sql\s*|```\s*', '', response, flags=re.IGNORECASE)
+        
+        # Remove common explanatory text
+        sql = re.sub(r'^(here is|here\'s|the sql query is).*?:\s*', '', sql, flags=re.IGNORECASE | re.MULTILINE)
+        
+        # Clean up whitespace
+        sql = sql.strip()
+        
+        return sql
+    
+    @staticmethod
+    def parse_general_response(response: str) -> str:
+        """
+        Clean general text response
+        
+        Args:
+            response: Raw LLM response
+            
+        Returns:
+            Cleaned response
+        """
+        # Remove excessive whitespace
+        cleaned = re.sub(r'\s+', ' ', response)
+        return cleaned.strip()
+    
+    @staticmethod
+    def extract_metadata(response: str, mode: str) -> Dict[str, Any]:
+        """
+        Extract metadata from response
+        
+        Args:
+            response: Raw LLM response
+            mode: Generation mode
+            
+        Returns:
+            Dictionary containing metadata
+        """
+        metadata = {
+            "length": len(response),
+            "mode": mode
+        }
+        
+        if mode == "sql_generation":
+            # Count SQL keywords
+            sql_keywords = ["SELECT", "FROM", "WHERE", "JOIN", "GROUP BY", "ORDER BY"]
+            metadata["sql_keywords"] = sum(1 for kw in sql_keywords if kw in response.upper())
+        
+        return metadata
