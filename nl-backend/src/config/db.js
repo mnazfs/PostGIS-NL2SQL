@@ -1,4 +1,9 @@
-const { Pool } = require('pg');
+import pg from 'pg';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const { Pool } = pg;
 
 // Create a connection pool
 const pool = new Pool({
@@ -45,9 +50,4 @@ const getClient = async () => {
   return await pool.connect();
 };
 
-module.exports = {
-  pool,
-  query,
-  getClient,
-  testConnection,
-};
+export { pool, query, getClient, testConnection };
