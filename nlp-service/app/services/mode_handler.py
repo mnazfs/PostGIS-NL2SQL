@@ -29,9 +29,14 @@ def handle_mode(mode: str, payload: dict) -> dict:
         response = call_ollama(prompt)
         
         raw_text = response.get("response", "")
-        parsed = ResponseParser.extract_json_from_response(raw_text)
+        print(f"📝 Raw LLM response for planning:\n{raw_text}\n")
         
-        return parsed
+        try:
+            parsed = ResponseParser.extract_json_from_response(raw_text)
+            return parsed
+        except Exception as e:
+            print(f"❌ Failed to parse JSON from LLM response: {str(e)}")
+            raise Exception(f"Failed to parse LLM response as JSON: {str(e)}")
     
     elif mode == "refinement":
         original_query = payload.get("original_query", "")
@@ -41,9 +46,14 @@ def handle_mode(mode: str, payload: dict) -> dict:
         response = call_ollama(prompt)
         
         raw_text = response.get("response", "")
-        parsed = ResponseParser.extract_json_from_response(raw_text)
+        print(f"📝 Raw LLM response for refinement:\n{raw_text}\n")
         
-        return parsed
+        try:
+            parsed = ResponseParser.extract_json_from_response(raw_text)
+            return parsed
+        except Exception as e:
+            print(f"❌ Failed to parse JSON from LLM response: {str(e)}")
+            raise Exception(f"Failed to parse LLM response as JSON: {str(e)}")
     
     elif mode == "formatting":
         original_query = payload.get("query", "")
@@ -53,11 +63,16 @@ def handle_mode(mode: str, payload: dict) -> dict:
         response = call_ollama(prompt)
         
         raw_text = response.get("response", "")
-        parsed = ResponseParser.extract_json_from_response(raw_text)
+        print(f"📝 Raw LLM response for formatting:\n{raw_text}\n")
         
-        return {
-            "summary": parsed.get("summary", "")
-        }
+        try:
+            parsed = ResponseParser.extract_json_from_response(raw_text)
+            return {
+                "summary": parsed.get("summary", "")
+            }
+        except Exception as e:
+            print(f"❌ Failed to parse JSON from LLM response: {str(e)}")
+            raise Exception(f"Failed to parse LLM response as JSON: {str(e)}")
     
     else:
         raise Exception(f"Unknown mode: {mode}")

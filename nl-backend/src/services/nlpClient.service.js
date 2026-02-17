@@ -47,7 +47,10 @@ async function callNLP(mode, payload) {
     
     // Check if the response indicates success
     if (data.success === false) {
-      throw new Error(data.message || 'NLP service returned success=false');
+      // Extract error message from response
+      const errorMsg = data.data?.error || data.message || 'NLP service returned success=false';
+      console.error('❌ NLP service error:', errorMsg);
+      throw new Error(errorMsg);
     }
     
     console.log(`✓ NLP service responded successfully`);

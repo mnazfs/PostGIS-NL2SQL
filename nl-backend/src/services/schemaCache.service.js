@@ -51,10 +51,11 @@ async function fetchTableColumns(tableName) {
  */
 async function fetchDistinctValues(tableName, columnName) {
   try {
+    // Use double quotes to preserve case sensitivity in PostgreSQL
     const result = await query(`
-      SELECT DISTINCT ${columnName}
-      FROM public.${tableName}
-      WHERE ${columnName} IS NOT NULL
+      SELECT DISTINCT "${columnName}"
+      FROM public."${tableName}"
+      WHERE "${columnName}" IS NOT NULL
       LIMIT 20
     `);
     
@@ -158,6 +159,31 @@ function getSchemaCache() {
 }
 
 /**
+ * Check if identifier needs quoting (has mixed case, spaces, or special chars)
+ */
+function needsQuoting(identifier) {
+  // Check if it has uppercase letters (mixed case)
+  if (/[A-Z]/.test(identifier)) {
+    return true;
+  }
+  // Check if it has spaces or starts with a number
+  if (/\s/.test(identifier) || /^\d/.test(identifier)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Format identifier with quotes if needed
+ */
+function formatIdentifier(identifier) {
+  if (needsQuoting(identifier)) {
+    return `"${identifier}"`;
+  }
+  return identifier;
+}
+
+/**
  * Get a formatted schema description for LLM context
  */
 function getSchemaDescription() {
@@ -168,13 +194,16 @@ function getSchemaDescription() {
   }
   
   let description = 'Database Schema (Public Schema):\n\n';
+  description += 'IMPORTANT: PostgreSQL is case-sensitive. Column/table names with mixed case MUST be quoted with double quotes.\n\n';
   
   Object.values(cache.tables).forEach(table => {
-    description += `Table: ${table.name}\n`;
+    const tableName = formatIdentifier(table.name);
+    description += `Table: ${tableName}\n`;
     description += 'Columns:\n';
     
     Object.values(table.columns).forEach(column => {
-      description += `  - ${column.name} (${column.dataType})`;
+      const columnName = formatIdentifier(column.name);
+      description += `  - ${columnName} (${column.dataType})`;
       
       if (!column.nullable) {
         description += ' NOT NULL';

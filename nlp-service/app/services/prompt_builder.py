@@ -11,7 +11,8 @@ def build_planning_prompt(query: str, schema: str) -> str:
     Returns:
         Formatted prompt string for planning
     """
-    prompt = f"""You are a PostgreSQL/PostGIS expert. Analyze the query and generate SQL.
+    prompt = f"""You are a PostgreSQL/PostGIS expert specializing in schema-grounded SQL generation.
+Your job is to generate SQL that strictly aligns with the provided database schema and sample values.
 
 DATABASE SCHEMA:
 {schema}
@@ -19,17 +20,33 @@ DATABASE SCHEMA:
 USER QUERY:
 {query}
 
-STRICT REQUIREMENTS:
+CRITICAL REQUIREMENTS:
 - Use ONLY SELECT statements (no INSERT, UPDATE, DELETE, DROP)
 - Always include LIMIT clause
+- **IMPORTANT**: Column/table names shown with double quotes in the schema MUST be quoted in your SQL
+- Example: If schema shows "No_of_floors", use "No_of_floors" in SQL (NOT No_of_floors)
 - Use proper PostGIS functions for spatial queries
 - Return VALID JSON ONLY, no markdown, no explanations
+- Use sample values provided in the schema to match user-mentioned entities.
+- When the user mentions a name (e.g., building name), compare it against sample values in the relevant column.
+- If the user uses abbreviations (e.g., "CSE"), attempt to match it to the closest available sample value.
+- Prefer ILIKE '%value%' for flexible matching instead of assuming prefixes like 'CSE%'.
+- DO NOT invent entity names that are not present in the schema sample values.
+- If no reasonable match is found from sample values, set "requires_second_phase" to true.
+- If a user term is similar to a sample value (e.g., CSE vs CS/IT Block), select the closest semantic match.
+
+MATCHING STRATEGY:
+1. Identify entities mentioned in the user query.
+2. Locate the corresponding table and column in the schema.
+3. Compare the entity against provided sample values.
+4. Choose the closest match.
+5. Only then generate SQL.
 
 OUTPUT FORMAT (JSON ONLY):
 {{
+  "sql": "your SQL query here",
   "confidence": 0.0-1.0,
-  "requires_second_phase": boolean,
-  "sql_queries": ["query1", "query2", ...]
+  "requires_second_phase": boolean
 }}
 
 Return only the JSON object, nothing else."""
@@ -65,7 +82,7 @@ STRICT REQUIREMENTS:
 
 OUTPUT FORMAT (JSON ONLY):
 {{
-  "refined_sql": "improved query",
+  "sql": "improved query",
   "changes_made": "brief description"
 }}
 
