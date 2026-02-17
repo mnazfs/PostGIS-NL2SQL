@@ -1,5 +1,5 @@
 import { BACKEND_URL } from '../config';
-import type { QueryResult } from '../types/query';
+import type { QueryResult, SystemStatusResponse, SchemaResponse } from '../types/query';
 
 interface BackendResponse {
   success: boolean;
@@ -13,17 +13,23 @@ interface BackendResponse {
 /**
  * Send a natural language query to the backend
  * @param query - The natural language query
+ * @param selectedTable - Optional table name for manual schema narrowing
  * @returns The response data from the backend
  * @throws Error if the request fails
  */
-export async function sendQuery(query: string): Promise<QueryResult> {
+export async function sendQuery(query: string, selectedTable?: string): Promise<QueryResult> {
   try {
+    const body: any = { query };
+    if (selectedTable) {
+      body.selectedTable = selectedTable;
+    }
+
     const response = await fetch(`${BACKEND_URL}/api/query`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {
@@ -48,4 +54,28 @@ export async function sendQuery(query: string): Promise<QueryResult> {
     }
     throw error;
   }
+}
+
+/**
+ * Fetch system status from backend
+ * @returns System status including database and schema readiness
+ */
+export async function fetchSystemStatus(): Promise<SystemStatusResponse> {
+  const response = await fetch(`${BACKEND_URL}/api/system-status`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch system status: ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
+ * Fetch database schema from backend
+ * @returns Schema information for all tables
+ */
+export async function fetchSchema(): Promise<SchemaResponse> {
+  const response = await fetch(`${BACKEND_URL}/api/schema`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch schema: ${response.status}`);
+  }
+  return response.json();
 }

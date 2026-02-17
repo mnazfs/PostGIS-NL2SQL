@@ -72,9 +72,10 @@ function filterSchemaByTables(schemaText, tables) {
  * Handle user query through the complete NLP pipeline
  * 
  * @param {string} userQuery - The natural language query from the user
+ * @param {string} [selectedTable] - Optional table name for manual schema narrowing
  * @returns {Promise<object>} Formatted response with data and metadata
  */
-async function handleUserQuery(userQuery) {
+async function handleUserQuery(userQuery, selectedTable = null) {
   const startTime = Date.now();
   
   try {
@@ -93,36 +94,60 @@ async function handleUserQuery(userQuery) {
     console.log(`✓ Schema loaded: ${schemaCache.tableCount} tables`);
     
     // Step 2: Table Selection Phase
-    console.log('\n🎯 Step 2: Calling NLP service for table selection...');
-    const schemaWithoutSamples = stripSampleValues(schemaDescription);
-    
     let selectedTables = [];
     let filteredSchema = schemaDescription; // Default to full schema
     
-    try {
-      const selectionResponse = await callNLP('table_selection', {
-        query: userQuery,
-        schema: schemaWithoutSamples
-      });
+    // Check if manual table selection is provided
+    if (selectedTable) {
+      console.log(`\n🔒 Manual table restriction enabled: ${selectedTable}`);
       
-      console.log('\n' + '═'.repeat(80));
-      console.log('🎯 TABLE SELECTION RESPONSE');
-      console.log('═'.repeat(80));
-      console.log(JSON.stringify(selectionResponse, null, 2));
-      console.log('═'.repeat(80));
+      // Validate that selectedTable exists in schema cache
+      const schemaTables = Object.keys(schemaCache.tables);
+      const tableExists = schemaTables.some(t => 
+        t.toLowerCase() === selectedTable.toLowerCase()
+      );
       
-      selectedTables = selectionResponse.relevant_tables || [];
-      
-      if (selectedTables.length > 0) {
-        console.log(`✓ Selected tables: [${selectedTables.join(', ')}]`);
-        filteredSchema = filterSchemaByTables(schemaDescription, selectedTables);
-        console.log(`✓ Filtered schema length: ${filteredSchema.length} characters`);
-      } else {
-        console.log('⚠️  No tables selected, using full schema as fallback');
+      if (!tableExists) {
+        const error = new Error(`Invalid selected table: "${selectedTable}" not found in schema`);
+        error.statusCode = 400;
+        throw error;
       }
-    } catch (selectionError) {
-      console.error('⚠️  Table selection failed:', selectionError.message);
-      console.log('⚠️  Using full schema as fallback');
+      
+      console.log('⏭️  Skipping table selection phase (manual selection provided)');
+      selectedTables = [selectedTable];
+      filteredSchema = filterSchemaByTables(schemaDescription, [selectedTable]);
+      console.log(`✓ Filtered schema to table: ${selectedTable}`);
+      console.log(`✓ Filtered schema length: ${filteredSchema.length} characters`);
+    } else {
+      // Run normal table selection phase
+      console.log('\n🎯 Step 2: Calling NLP service for table selection...');
+      const schemaWithoutSamples = stripSampleValues(schemaDescription);
+      
+      try {
+        const selectionResponse = await callNLP('table_selection', {
+          query: userQuery,
+          schema: schemaWithoutSamples
+        });
+        
+        console.log('\n' + '═'.repeat(80));
+        console.log('🎯 TABLE SELECTION RESPONSE');
+        console.log('═'.repeat(80));
+        console.log(JSON.stringify(selectionResponse, null, 2));
+        console.log('═'.repeat(80));
+        
+        selectedTables = selectionResponse.relevant_tables || [];
+        
+        if (selectedTables.length > 0) {
+          console.log(`✓ Selected tables: [${selectedTables.join(', ')}]`);
+          filteredSchema = filterSchemaByTables(schemaDescription, selectedTables);
+          console.log(`✓ Filtered schema length: ${filteredSchema.length} characters`);
+        } else {
+          console.log('⚠️  No tables selected, using full schema as fallback');
+        }
+      } catch (selectionError) {
+        console.error('⚠️  Table selection failed:', selectionError.message);
+        console.log('⚠️  Using full schema as fallback');
+      }
     }
     
     // Step 3: Call NLP service with mode "planning"

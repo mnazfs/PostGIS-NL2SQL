@@ -14,7 +14,7 @@ router.get('/health', (req, res) => {
 // Process natural language query
 router.post('/', async (req, res) => {
   try {
-    const { query } = req.body;
+    const { query, selectedTable } = req.body;
 
     // Validate query parameter
     if (!query) {
@@ -35,7 +35,7 @@ router.post('/', async (req, res) => {
     }
 
     // Process the query through the agent orchestrator
-    const result = await handleUserQuery(query.trim());
+    const result = await handleUserQuery(query.trim(), selectedTable);
 
     // Return the result (success or error handled by handleUserQuery)
     const statusCode = result.success ? 200 : 500;
@@ -43,9 +43,10 @@ router.post('/', async (req, res) => {
 
   } catch (error) {
     console.error('Query route error:', error);
-    res.status(500).json({
+    const statusCode = error.statusCode || 500;
+    res.status(statusCode).json({
       success: false,
-      error: 'Internal Server Error',
+      error: statusCode === 400 ? 'Bad Request' : 'Internal Server Error',
       message: error.message,
       phase: 'route_handler'
     });

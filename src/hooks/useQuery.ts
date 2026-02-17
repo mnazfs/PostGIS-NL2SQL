@@ -14,9 +14,10 @@ export function useQuery(): UseQueryReturn {
   /**
    * Execute a natural language query
    * @param query - The query to execute
+   * @param selectedTable - Optional table name for manual schema narrowing
    * @returns The query result or null if error
    */
-  const executeQuery = async (query: string): Promise<QueryResult | null> => {
+  const executeQuery = async (query: string, selectedTable?: string): Promise<QueryResult | null> => {
     if (!query?.trim()) {
       setError('Query cannot be empty');
       return null;
@@ -27,7 +28,7 @@ export function useQuery(): UseQueryReturn {
     setResult(null);
 
     try {
-      const data = await sendQuery(query);
+      const data = await sendQuery(query, selectedTable);
       setResult(data);
       return data;
     } catch (err) {

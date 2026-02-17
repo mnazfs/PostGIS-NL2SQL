@@ -20,8 +20,30 @@ export interface QueryResult {
 }
 
 export interface UseQueryReturn {
-  executeQuery: (query: string) => Promise<QueryResult | null>;
+  executeQuery: (query: string, selectedTable?: string) => Promise<QueryResult | null>;
   loading: boolean;
   error: string | null;
   result: QueryResult | null;
+}
+
+export interface ColumnSchema {
+  name: string;
+  type: string;
+  sample_values?: string[];
+}
+
+export interface TableSchema {
+  name: string;
+  columns: ColumnSchema[];
+}
+
+export interface SchemaResponse {
+  tables: TableSchema[];
+}
+
+export interface SystemStatusResponse {
+  ready: boolean;
+  database_connected: boolean;
+  schema_loaded: boolean;
+  tables_count: number;
 }
