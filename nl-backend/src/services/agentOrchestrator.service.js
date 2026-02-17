@@ -11,6 +11,64 @@ import { extractGeoJSON } from '../utils/queryHelpers.js';
  */
 
 /**
+ * Strip sample values from schema description
+ * 
+ * @param {string} schemaText - The full schema description
+ * @returns {string} Schema without sample values
+ */
+function stripSampleValues(schemaText) {
+  const lines = schemaText.split('\n');
+  const filteredLines = lines.filter(line => !line.trim().startsWith('Sample values:'));
+  return filteredLines.join('\n');
+}
+
+/**
+ * Filter schema to include only specified tables
+ * 
+ * @param {string} schemaText - The full schema description
+ * @param {string[]} tables - Array of table names to include
+ * @returns {string} Filtered schema with only selected tables
+ */
+function filterSchemaByTables(schemaText, tables) {
+  if (!tables || tables.length === 0) {
+    return schemaText; // Return full schema if no tables specified
+  }
+  
+  const lines = schemaText.split('\n');
+  const filteredLines = [];
+  let currentTable = null;
+  let includeCurrentTable = false;
+  
+  // Keep the header lines (first 3 lines typically)
+  const headerLines = lines.slice(0, 3);
+  filteredLines.push(...headerLines);
+  
+  for (let i = 3; i < lines.length; i++) {
+    const line = lines[i];
+    
+    // Check if this is a table line
+    if (line.startsWith('Table: ')) {
+      // Extract table name (remove quotes if present)
+      const tableName = line.substring(7).trim().replace(/"/g, '');
+      currentTable = tableName;
+      includeCurrentTable = tables.some(t => 
+        t.toLowerCase() === tableName.toLowerCase() || 
+        t.replace(/"/g, '').toLowerCase() === tableName.toLowerCase()
+      );
+      
+      if (includeCurrentTable) {
+        filteredLines.push(line);
+      }
+    } else if (includeCurrentTable) {
+      // Include all lines belonging to the current table
+      filteredLines.push(line);
+    }
+  }
+  
+  return filteredLines.join('\n');
+}
+
+/**
  * Handle user query through the complete NLP pipeline
  * 
  * @param {string} userQuery - The natural language query from the user
@@ -34,11 +92,44 @@ async function handleUserQuery(userQuery) {
     const schemaDescription = getSchemaDescription();
     console.log(`✓ Schema loaded: ${schemaCache.tableCount} tables`);
     
-    // Step 2: Call NLP service with mode "planning"
-    console.log('\n🤖 Step 2: Calling NLP service for query planning...');
+    // Step 2: Table Selection Phase
+    console.log('\n🎯 Step 2: Calling NLP service for table selection...');
+    const schemaWithoutSamples = stripSampleValues(schemaDescription);
+    
+    let selectedTables = [];
+    let filteredSchema = schemaDescription; // Default to full schema
+    
+    try {
+      const selectionResponse = await callNLP('table_selection', {
+        query: userQuery,
+        schema: schemaWithoutSamples
+      });
+      
+      console.log('\n' + '═'.repeat(80));
+      console.log('🎯 TABLE SELECTION RESPONSE');
+      console.log('═'.repeat(80));
+      console.log(JSON.stringify(selectionResponse, null, 2));
+      console.log('═'.repeat(80));
+      
+      selectedTables = selectionResponse.relevant_tables || [];
+      
+      if (selectedTables.length > 0) {
+        console.log(`✓ Selected tables: [${selectedTables.join(', ')}]`);
+        filteredSchema = filterSchemaByTables(schemaDescription, selectedTables);
+        console.log(`✓ Filtered schema length: ${filteredSchema.length} characters`);
+      } else {
+        console.log('⚠️  No tables selected, using full schema as fallback');
+      }
+    } catch (selectionError) {
+      console.error('⚠️  Table selection failed:', selectionError.message);
+      console.log('⚠️  Using full schema as fallback');
+    }
+    
+    // Step 3: Call NLP service with mode "planning"
+    console.log('\n🤖 Step 3: Calling NLP service for query planning...');
     const planningResponse = await callNLP('planning', {
       query: userQuery,
-      schema: schemaDescription
+      schema: filteredSchema
     });
     
     console.log('\n' + '═'.repeat(80));
@@ -67,8 +158,8 @@ async function handleUserQuery(userQuery) {
     console.log('─'.repeat(80));
     console.log(`Requires second phase: ${requires_second_phase}`);
     
-    // Step 3: Validate SQL
-    console.log('\n✅ Step 3: Validating Phase 1 SQL...');
+    // Step 4: Validate SQL
+    console.log('\n✅ Step 4: Validating Phase 1 SQL...');
     const validation = validateSQL(plannedSQL, schemaCache);
     
     if (!validation.valid) {
@@ -91,8 +182,8 @@ async function handleUserQuery(userQuery) {
     
     console.log('✓ SQL validation passed');
     
-    // Step 4: Execute SQL
-    console.log('\n⚡ Step 4: Executing Phase 1 SQL...');
+    // Step 5: Execute SQL
+    console.log('\n⚡ Step 5: Executing Phase 1 SQL...');
     const phase1StartTime = Date.now();
     let executionResult = await executeSQL(plannedSQL);
     const phase1ExecutionTime = Date.now() - phase1StartTime;
@@ -110,11 +201,11 @@ async function handleUserQuery(userQuery) {
     }
     console.log('═'.repeat(80));
     
-    // Step 5: Check if refinement is needed
+    // Step 6: Check if refinement is needed
     const needsRefinement = requires_second_phase || executionResult.length === 0;
     
     if (needsRefinement) {
-      console.log('\n🔄 Step 5: Refinement needed - calling NLP service again...');
+      console.log('\n🔄 Step 6: Refinement needed - calling NLP service again...');
       console.log(`Reason: ${requires_second_phase ? 'Second phase required' : 'Empty result set'}`);
       
       try {
@@ -183,8 +274,8 @@ async function handleUserQuery(userQuery) {
       }
     }
     
-    // Step 6: Call NLP service for formatting
-    console.log('\n📝 Step 6: Formatting response...');
+    // Step 7: Call NLP service for formatting
+    console.log('\n📝 Step 7: Formatting response...');
     let formattedResponse;
     
     try {
@@ -207,10 +298,10 @@ async function handleUserQuery(userQuery) {
       formattedResponse = `Found ${executionResult.length} result(s) for your query.`;
     }
     
-    // Step 7: Extract GeoJSON if available
+    // Step 8: Extract GeoJSON if available
     const geojson = extractGeoJSON(executionResult);
     
-    // Step 8: Return final structured response
+    // Step 9: Return final structured response
     const totalExecutionTime = Date.now() - startTime;
     console.log('\n✨ Query processing complete!');
     console.log(`⏱️  Total execution time: ${totalExecutionTime}ms\n`);

@@ -3,7 +3,8 @@ from app.services.ollama_client import call_ollama
 from app.services.prompt_builder import (
     build_planning_prompt,
     build_refinement_prompt,
-    build_formatting_prompt
+    build_formatting_prompt,
+    PromptBuilder
 )
 from app.services.response_parser import ResponseParser
 
@@ -70,6 +71,27 @@ def handle_mode(mode: str, payload: dict) -> dict:
             return {
                 "summary": parsed.get("summary", "")
             }
+        except Exception as e:
+            print(f"❌ Failed to parse JSON from LLM response: {str(e)}")
+            raise Exception(f"Failed to parse LLM response as JSON: {str(e)}")
+    
+    elif mode == "table_selection":
+        query = payload.get("query", "")
+        schema = payload.get("schema", "")
+        
+        prompt = PromptBuilder.build_prompt(
+            user_input=query,
+            mode="table_selection",
+            context={"schema": schema}
+        )
+        response = call_ollama(prompt)
+        
+        raw_text = response.get("response", "")
+        print(f"📝 Raw LLM response for table_selection:\n{raw_text}\n")
+        
+        try:
+            parsed = ResponseParser.extract_json_from_response(raw_text)
+            return parsed
         except Exception as e:
             print(f"❌ Failed to parse JSON from LLM response: {str(e)}")
             raise Exception(f"Failed to parse LLM response as JSON: {str(e)}")

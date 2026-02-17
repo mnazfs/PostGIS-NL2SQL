@@ -41,6 +41,15 @@ MATCHING STRATEGY:
 3. Compare the entity against provided sample values.
 4. Choose the closest match.
 5. Only then generate SQL.
+6. Verify that all selected columns exist in the chosen table before finalizing SQL.
+
+COLUMN-TABLE CONSISTENCY RULES:
+- Every column used in the SQL query MUST exist in the selected table.
+- You MUST verify column existence using the schema provided.
+- Do NOT reference a column from one table while selecting FROM another table.
+- If a column exists in only one table, you MUST use that table in the FROM clause.
+- If multiple tables are provided, choose the table that contains all required columns.
+- Never assume a column exists in a table unless explicitly shown in the schema.
 
 OUTPUT FORMAT (JSON ONLY):
 {{
@@ -158,6 +167,8 @@ class PromptBuilder:
             return PromptBuilder._build_schema_prompt(user_input, context)
         elif mode == "query_explanation":
             return PromptBuilder._build_explanation_prompt(user_input, context)
+        elif mode == "table_selection":
+            return PromptBuilder._build_table_selection_prompt(user_input, context)
         else:
             return user_input
     
@@ -202,4 +213,49 @@ SQL Query:
 {query}
 
 Provide a clear explanation of what this query does."""
+        return prompt
+    
+    @staticmethod
+    def _build_table_selection_prompt(user_input: str, context: Dict[str, Any]) -> str:
+        """Build prompt for table selection phase
+        
+        This prompt helps identify which tables are relevant to answer the user's query.
+        It includes only table and column names without data types, constraints, or sample values.
+        
+        Args:
+            user_input: The user's natural language query
+            context: Dictionary containing schema information
+            
+        Returns:
+            Formatted prompt string for table selection
+        """
+        schema = context.get("schema", "")
+        
+        # Extract only table and column names from schema (no data types, constraints, or sample values)
+        # The schema is expected to be provided in a simplified format by the caller
+        
+        prompt = f"""You are a database expert specializing in table selection for query planning.
+Your task is to identify which tables are needed to answer the user's query.
+
+DATABASE SCHEMA (Table and Column Names Only):
+{schema}
+
+USER QUERY:
+{user_input}
+
+CRITICAL REQUIREMENTS:
+- Identify which tables are needed to answer the query
+- Choose only tables that are directly required
+- If unsure, include the most likely table
+- Return VALID JSON ONLY, no markdown, no explanations
+- DO NOT generate SQL
+- DO NOT include explanations
+
+OUTPUT FORMAT (JSON ONLY):
+{{
+  "relevant_tables": ["table1", "table2"],
+  "confidence": 0.0-1.0
+}}
+
+Return only the JSON object, nothing else."""
         return prompt
