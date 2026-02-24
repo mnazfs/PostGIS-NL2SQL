@@ -3,6 +3,9 @@ import { callNLP } from './nlpClient.service.js';
 import { executeSQL } from './sqlExecutor.service.js';
 import { extractGeoJSON } from '../utils/queryHelpers.js';
 import { matchEntity } from './entityMatcher.service.js';
+import { detectIntent } from './intentClassifier.service.js';
+import { handleRAG as ragHandler } from './ragHandler.service.js';
+import { handleGeo as geoHandler } from './geoHandler.service.js';
 
 /**
  * Agent Orchestrator Service
@@ -81,6 +84,59 @@ async function handleUserQuery(userQuery, selectedTable = null) {
   try {
     console.log(`\n🔍 Processing user query: "${userQuery}"`);
     console.log(`⏱️  Start time: ${new Date().toISOString()}`);
+    
+    // Step 0: Detect Intent
+    console.log('\n🎯 Step 0: Detecting query intent...');
+    const intent = await detectIntent(userQuery);
+    console.log(`✓ Intent detected: ${intent}`);
+    
+    // Route based on intent
+    switch (intent) {
+      case 'sql_query':
+        return await handleSQLQuery(userQuery, selectedTable, startTime, intent);
+      
+      case 'knowledge_query':
+        return await handleRAG(userQuery, startTime, intent);
+      
+      case 'geo_query':
+        return await handleGeo(userQuery, startTime, intent);
+      
+      default:
+        console.log(`⚠️  Unknown intent: ${intent}, defaulting to SQL query`);
+        return await handleSQLQuery(userQuery, selectedTable, startTime, intent);
+    }
+    
+  } catch (error) {
+    const totalExecutionTime = Date.now() - startTime;
+    console.error('\n❌ Error processing query:', error.message);
+    console.error(`Stack trace:`, error.stack);
+    console.log(`⏱️  Total execution time: ${totalExecutionTime}ms\n`);
+    
+    // Return structured error response
+    return {
+      intent: 'unknown',
+      source: 'error',
+      answer: {
+        success: false,
+        error: error.name || 'QueryProcessingError',
+        message: error.message,
+        summary: `An error occurred while processing your query: ${error.message}`
+      }
+    };
+  }
+}
+
+/**
+ * Handle SQL query (existing pipeline)
+ * 
+ * @param {string} userQuery - The natural language query from the user
+ * @param {string} [selectedTable] - Optional table name for manual schema narrowing
+ * @param {number} startTime - Start timestamp for performance tracking
+ * @param {string} intent - The detected intent
+ * @returns {Promise<object>} Formatted response with data and metadata
+ */
+async function handleSQLQuery(userQuery, selectedTable, startTime, intent) {
+  try {
     
     // Step 1: Get schema cache
     console.log('\n📊 Step 1: Retrieving schema cache...');
@@ -261,27 +317,94 @@ async function handleUserQuery(userQuery, selectedTable = null) {
     console.log(`⏱️  Total execution time: ${totalExecutionTime}ms\n`);
     
     return {
-      success: true,
-      summary: formattedResponse,
-      rows: executionResult,
-      geojson: geojson
+      intent: intent || 'sql_query',
+      source: 'database',
+      answer: {
+        success: true,
+        summary: formattedResponse,
+        rows: executionResult,
+        geojson: geojson
+      }
     };
     
   } catch (error) {
     const totalExecutionTime = Date.now() - startTime;
-    console.error('\n❌ Error processing query:', error.message);
+    console.error('\n❌ Error in SQL query handler:', error.message);
     console.error(`Stack trace:`, error.stack);
     console.log(`⏱️  Total execution time: ${totalExecutionTime}ms\n`);
     
-    // Return structured error response
+    throw error; // Re-throw to be caught by handleUserQuery
+  }
+}
+
+/**
+ * Handle RAG knowledge query
+ * 
+ * @param {string} userQuery - The natural language query from the user
+ * @param {number} startTime - Start timestamp for performance tracking
+ * @param {string} intent - The detected intent
+ * @returns {Promise<object>} Formatted response with knowledge answer
+ */
+async function handleRAG(userQuery, startTime, intent) {
+  try {
+    console.log('\n📚 Handling knowledge query with RAG...');
+    
+    // Call RAG handler service
+    const answer = await ragHandler(userQuery);
+    
+    const totalExecutionTime = Date.now() - startTime;
+    console.log(`✨ RAG query complete!`);
+    console.log(`⏱️  Total execution time: ${totalExecutionTime}ms\n`);
+    
     return {
-      success: false,
-      error: error.name || 'QueryProcessingError',
-      message: error.message,
-      summary: `An error occurred while processing your query: ${error.message}`,
-      rows: [],
-      geojson: null
+      intent: intent || 'knowledge_query',
+      source: 'knowledge_base',
+      answer: {
+        success: true,
+        summary: answer,
+        execution_time_ms: totalExecutionTime
+      }
     };
+    
+  } catch (error) {
+    const totalExecutionTime = Date.now() - startTime;
+    console.error('\n❌ Error in RAG handler:', error.message);
+    console.log(`⏱️  Total execution time: ${totalExecutionTime}ms\n`);
+    throw error;
+  }
+}
+
+/**
+ * Handle geospatial query
+ * 
+ * @param {string} userQuery - The natural language query from the user
+ * @param {number} startTime - Start timestamp for performance tracking
+ * @param {string} intent - The detected intent
+ * @returns {Promise<object>} Formatted response with geospatial results
+ */
+async function handleGeo(userQuery, startTime, intent) {
+  try {
+    // Call geo handler service
+    const result = await geoHandler(userQuery);
+    
+    const totalExecutionTime = Date.now() - startTime;
+    console.log(`✨ Geospatial query complete!`);
+    console.log(`⏱️  Total execution time: ${totalExecutionTime}ms\n`);
+    
+    return {
+      intent: intent || 'geo_query',
+      source: 'database',
+      answer: {
+        ...result,
+        execution_time_ms: totalExecutionTime
+      }
+    };
+    
+  } catch (error) {
+    const totalExecutionTime = Date.now() - startTime;
+    console.error('\n❌ Error in geo handler:', error.message);
+    console.log(`⏱️  Total execution time: ${totalExecutionTime}ms\n`);
+    throw error;
   }
 }
 

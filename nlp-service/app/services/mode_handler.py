@@ -9,6 +9,8 @@ from app.services.prompt_builder import (
 from app.services.response_parser import ResponseParser
 from app.models.query_plan import QueryPlan
 from app.models.sql_builder import build_sql
+from app.modes.intent import classify_intent
+from app.modes.rag import generate_rag_answer
 
 
 def parse_schema(schema_text: str) -> Dict[str, Dict[str, Any]]:
@@ -187,6 +189,30 @@ def handle_mode(mode: str, payload: dict) -> dict:
         except Exception as e:
             print(f"❌ Failed to parse JSON from LLM response: {str(e)}")
             raise Exception(f"Failed to parse LLM response as JSON: {str(e)}")
+    
+    elif mode == "intent":
+        query = payload.get("query", "")
+        
+        if not query:
+            raise Exception("Query is required for intent classification")
+        
+        # Call classify_intent to get intent classification
+        intent_result = classify_intent(query)
+        print(f"🎯 Intent classified: {intent_result}\n")
+        
+        return intent_result
+    
+    elif mode == "rag":
+        query = payload.get("query", "")
+        
+        if not query:
+            raise Exception("Query is required for RAG")
+        
+        # Call generate_rag_answer to get knowledge-based answer
+        rag_result = generate_rag_answer(query)
+        print(f"📚 RAG answer generated\n")
+        
+        return rag_result
     
     else:
         raise Exception(f"Unknown mode: {mode}")
