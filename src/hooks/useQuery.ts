@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { sendQuery } from '../services/api';
+import { sendQuery } from '../services/api.ts';
 import type { QueryResult, UseQueryReturn } from '../types/query';
 
 /**

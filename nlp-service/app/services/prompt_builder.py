@@ -11,8 +11,25 @@ def build_planning_prompt(query: str, schema: str) -> str:
     Returns:
         Formatted prompt string for planning
     """
-    prompt = f"""You are a PostgreSQL/PostGIS expert specializing in schema-grounded SQL generation.
-Your job is to generate SQL that strictly aligns with the provided database schema and sample values.
+    prompt = f"""You MUST return ONLY a valid JSON object.
+
+STRICT OUTPUT RULES:
+- Do NOT include any explanation.
+- Do NOT include markdown.
+- Do NOT include triple backticks.
+- Do NOT include any text before or after JSON.
+- Output must start with {{ and end with }}.
+- Do NOT wrap JSON in code blocks.
+- Do NOT add commentary.
+- If you include anything outside JSON, the response will be rejected.
+
+You are a database query planner.
+
+Your task is to generate a structured query plan in JSON format.
+
+DO NOT generate SQL.
+
+Use ONLY the tables and columns provided in the schema.
 
 DATABASE SCHEMA:
 {schema}
@@ -20,45 +37,60 @@ DATABASE SCHEMA:
 USER QUERY:
 {query}
 
-CRITICAL REQUIREMENTS:
-- Use ONLY SELECT statements (no INSERT, UPDATE, DELETE, DROP)
-- Always include LIMIT clause
-- **IMPORTANT**: Column/table names shown with double quotes in the schema MUST be quoted in your SQL
-- Example: If schema shows "No_of_floors", use "No_of_floors" in SQL (NOT No_of_floors)
-- Use proper PostGIS functions for spatial queries
-- Return VALID JSON ONLY, no markdown, no explanations
-- Use sample values provided in the schema to match user-mentioned entities.
-- When the user mentions a name (e.g., building name), compare it against sample values in the relevant column.
-- If the user uses abbreviations (e.g., "CSE"), attempt to match it to the closest available sample value.
-- Prefer ILIKE '%value%' for flexible matching instead of assuming prefixes like 'CSE%'.
-- DO NOT invent entity names that are not present in the schema sample values.
-- If no reasonable match is found from sample values, set "requires_second_phase" to true.
-- If a user term is similar to a sample value (e.g., CSE vs CS/IT Block), select the closest semantic match.
+Allowed operators:
+- equals
+- contains
+- greater_than
+- less_than
 
-MATCHING STRATEGY:
-1. Identify entities mentioned in the user query.
-2. Locate the corresponding table and column in the schema.
-3. Compare the entity against provided sample values.
-4. Choose the closest match.
-5. Only then generate SQL.
-6. Verify that all selected columns exist in the chosen table before finalizing SQL.
+Allowed aggregation functions:
+- COUNT
+- SUM
+- AVG
+- MAX
+- MIN
 
-COLUMN-TABLE CONSISTENCY RULES:
-- Every column used in the SQL query MUST exist in the selected table.
-- You MUST verify column existence using the schema provided.
-- Do NOT reference a column from one table while selecting FROM another table.
-- If a column exists in only one table, you MUST use that table in the FROM clause.
-- If multiple tables are provided, choose the table that contains all required columns.
-- Never assume a column exists in a table unless explicitly shown in the schema.
+Rules:
+- If user asks "how many", use operation = "count" and set aggregations = []
+- If user asks for SUM/AVG/MAX/MIN of a column, use operation = "aggregate"
+- If user asks for specific field, use operation = "select"
+- Never invent new columns
+- Never invent new tables
+- Never include SQL syntax
 
-OUTPUT FORMAT (JSON ONLY):
+When specifying column names:
+- Use column names exactly as shown in schema
+- Do NOT include double quotes around column names
+- Example: use Name, not \"Name\"
+
+Output format:
 {{
-  "sql": "your SQL query here",
-  "confidence": 0.0-1.0,
-  "requires_second_phase": boolean
+  "operation": "count" | "select" | "aggregate",
+  "table": "table_name",
+  "columns": ["col1", "col2"],
+  "aggregations": [],
+  "conditions": [],
+  "limit": 10
 }}
 
-Return only the JSON object, nothing else."""
+For operation = "count": Set aggregations = [], columns can be []
+For operation = "select": Set aggregations = [], list columns to retrieve
+For operation = "aggregate": Set aggregations = [{{"function": "SUM", "column": "column_name"}}]
+
+Aggregation object format:
+{{
+  "function": "COUNT" | "SUM" | "AVG" | "MAX" | "MIN",
+  "column": "column_name"
+}}
+
+Condition object format:
+{{
+  "column": "column_name",
+  "operator": "equals" | "contains" | "greater_than" | "less_than",
+  "value": "value"
+}}
+
+Return ONLY the JSON object, nothing else."""
     return prompt
 
 def build_refinement_prompt(original_query: str, execution_results: dict) -> str:
@@ -88,6 +120,11 @@ STRICT REQUIREMENTS:
 - Always include LIMIT clause
 - Fix any errors or inefficiencies
 - Return VALID JSON ONLY, no markdown, no explanations
+- DO NOT introduce new columns or functions that were not present in the original SQL unless fixing a clear execution error.
+- DO NOT change selected columns unless necessary.
+- DO NOT include a semicolon at the end of the SQL query.
+- The SQL string MUST NOT end with ';'.
+- If execution returned 0 rows, adjust only the WHERE clause matching logic.
 
 OUTPUT FORMAT (JSON ONLY):
 {{

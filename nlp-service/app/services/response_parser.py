@@ -24,12 +24,15 @@ class ResponseParser:
             cleaned = re.sub(r'```json\s*', '', raw_text, flags=re.IGNORECASE)
             cleaned = re.sub(r'```\s*', '', cleaned)
             
-            # Try to find JSON block (between { and })
-            match = re.search(r'\{.*\}', cleaned, flags=re.DOTALL)
-            if match:
-                json_str = match.group(0)
-            else:
-                json_str = cleaned.strip()
+            # Find first { and last } to extract JSON object
+            first_brace = cleaned.find('{')
+            last_brace = cleaned.rfind('}')
+            
+            if first_brace == -1 or last_brace == -1:
+                raise Exception("No JSON object found in LLM response")
+            
+            # Extract substring from first { to last }
+            json_str = cleaned[first_brace:last_brace + 1]
             
             # Parse JSON strictly
             parsed = json.loads(json_str)

@@ -1,8 +1,8 @@
 import { getSchemaCache, getSchemaDescription } from './schemaCache.service.js';
 import { callNLP } from './nlpClient.service.js';
-import { validateSQL } from './sqlValidator.service.js';
 import { executeSQL } from './sqlExecutor.service.js';
 import { extractGeoJSON } from '../utils/queryHelpers.js';
+import { matchEntity } from './entityMatcher.service.js';
 
 /**
  * Agent Orchestrator Service
@@ -150,6 +150,16 @@ async function handleUserQuery(userQuery, selectedTable = null) {
       }
     }
     
+    // Step 2.5: Entity Matching (if buildings table selected)
+    let entityMatch = null;
+    if (selectedTables.length > 0 && selectedTables[0].toLowerCase() === 'buildings') {
+      try {
+        entityMatch = await matchEntity(userQuery, 'buildings', 'Name');
+      } catch (matchError) {
+        console.error('⚠️  Entity matching failed:', matchError.message);
+      }
+    }
+    
     // Step 3: Call NLP service with mode "planning"
     console.log('\n🤖 Step 3: Calling NLP service for query planning...');
     const planningResponse = await callNLP('planning', {
@@ -163,13 +173,34 @@ async function handleUserQuery(userQuery, selectedTable = null) {
     console.log(JSON.stringify(planningResponse, null, 2));
     console.log('═'.repeat(80));
     
-    const { sql: plannedSQL, requires_second_phase } = planningResponse;
+    let { sql: plannedSQL, plan } = planningResponse;
+    
+    // Override condition value with matched entity if found with high confidence
+    if (entityMatch && entityMatch.confidence >= 0.75 && plan && plan.conditions && plan.conditions.length > 0) {
+      console.log(`\n🎯 Overriding condition with matched entity: "${entityMatch.value}" (confidence: ${(entityMatch.confidence * 100).toFixed(0)}%)`);
+      
+      // Find Name column condition and override it
+      for (const condition of plan.conditions) {
+        if (condition.column === 'Name' || condition.column === 'name') {
+          condition.value = entityMatch.value;
+          condition.operator = 'equals'; // Use exact match instead of contains
+          console.log(`✓ Updated condition: ${condition.column} ${condition.operator} "${condition.value}"`);
+          
+          // Rebuild SQL with exact match
+          const whereClause = `"${condition.column}" = '${condition.value}'`;
+          plannedSQL = plannedSQL.replace(/WHERE .* LIMIT/i, `WHERE ${whereClause} LIMIT`);
+          console.log(`✓ Updated SQL: ${plannedSQL}`);
+        }
+      }
+    } else if (entityMatch && entityMatch.confidence < 0.75) {
+      console.log(`⚠️  Entity match found but confidence too low (${(entityMatch.confidence * 100).toFixed(0)}%), keeping LLM condition`);
+    }
     
     if (!plannedSQL) {
       throw new Error('NLP service did not return SQL in planning phase');
     }
     
-    console.log('\n📝 PHASE 1 SQL:');
+    console.log('\n📝 GENERATED SQL:');
     console.log('─'.repeat(80));
     if (Array.isArray(plannedSQL)) {
       plannedSQL.forEach((query, index) => {
@@ -181,152 +212,50 @@ async function handleUserQuery(userQuery, selectedTable = null) {
       console.log(plannedSQL);
     }
     console.log('─'.repeat(80));
-    console.log(`Requires second phase: ${requires_second_phase}`);
     
-    // Step 4: Validate SQL
-    console.log('\n✅ Step 4: Validating Phase 1 SQL...');
-    const validation = validateSQL(plannedSQL, schemaCache);
-    
-    if (!validation.valid) {
-      console.error('\n❌ VALIDATION FAILED (Phase 1):');
-      console.error(`Reason: ${validation.reason}`);
-      console.error(`SQL: ${plannedSQL}`);
-      
-      const executionTime = Date.now() - startTime;
-      console.log(`⏱️  Total execution time: ${executionTime}ms\n`);
-      
-      return {
-        success: false,
-        error: 'SQL Validation Failed',
-        message: validation.reason,
-        summary: `Unable to validate the SQL query: ${validation.reason}`,
-        rows: [],
-        geojson: null
-      };
-    }
-    
-    console.log('✓ SQL validation passed');
-    
-    // Step 5: Execute SQL
-    console.log('\n⚡ Step 5: Executing Phase 1 SQL...');
-    const phase1StartTime = Date.now();
+    // Step 4: Execute SQL
+    console.log('\n⚡ Step 4: Executing SQL...');
+    const executionStartTime = Date.now();
     let executionResult = await executeSQL(plannedSQL);
-    const phase1ExecutionTime = Date.now() - phase1StartTime;
-    let finalSQL = plannedSQL;
-    let refinementApplied = false;
+    const executionTime = Date.now() - executionStartTime;
     
     console.log('\n' + '═'.repeat(80));
-    console.log('📊 SQL EXECUTION RESULTS (PHASE 1)');
+    console.log('📊 SQL EXECUTION RESULTS');
     console.log('═'.repeat(80));
     console.log(`Rows returned: ${executionResult.length}`);
-    console.log(`Execution time: ${phase1ExecutionTime}ms`);
+    console.log(`Execution time: ${executionTime}ms`);
     if (executionResult.length > 0) {
       console.log('\nSample data (first row):');
       console.log(JSON.stringify(executionResult[0], null, 2));
     }
     console.log('═'.repeat(80));
     
-    // Step 6: Check if refinement is needed
-    const needsRefinement = requires_second_phase || executionResult.length === 0;
-    
-    if (needsRefinement) {
-      console.log('\n🔄 Step 6: Refinement needed - calling NLP service again...');
-      console.log(`Reason: ${requires_second_phase ? 'Second phase required' : 'Empty result set'}`);
-      
-      try {
-        const refinementResponse = await callNLP('refinement', {
-          original_query: userQuery,
-          execution_results: executionResult
-        });
-        
-        console.log('\n' + '═'.repeat(80));
-        console.log('🔄 REFINEMENT RESPONSE');
-        console.log('═'.repeat(80));
-        console.log(JSON.stringify(refinementResponse, null, 2));
-        console.log('═'.repeat(80));
-        
-        const refinedSQL = refinementResponse.sql;
-        
-        if (refinedSQL) {
-          console.log('\n📝 PHASE 2 SQL:');
-          console.log('─'.repeat(80));
-          if (Array.isArray(refinedSQL)) {
-            refinedSQL.forEach((query, index) => {
-              console.log(`Query ${index + 1}:`);
-              console.log(query);
-              if (index < refinedSQL.length - 1) console.log('');
-            });
-          } else {
-            console.log(refinedSQL);
-          }
-          console.log('─'.repeat(80));
-          
-          // Validate refined SQL
-          console.log('\n✅ Validating Phase 2 SQL...');
-          const refinedValidation = validateSQL(refinedSQL, schemaCache);
-          
-          if (refinedValidation.valid) {
-            console.log('✓ Refined SQL validation passed');
-            
-            // Execute refined SQL
-            console.log('⚡ Executing Phase 2 SQL...');
-            const phase2StartTime = Date.now();
-            executionResult = await executeSQL(refinedSQL);
-            const phase2ExecutionTime = Date.now() - phase2StartTime;
-            finalSQL = refinedSQL;
-            refinementApplied = true;
-            
-            console.log('\n' + '═'.repeat(80));
-            console.log('📊 SQL EXECUTION RESULTS (PHASE 2)');
-            console.log('═'.repeat(80));
-            console.log(`Rows returned: ${executionResult.length}`);
-            console.log(`Execution time: ${phase2ExecutionTime}ms`);
-            if (executionResult.length > 0) {
-              console.log('\nSample data (first row):');
-              console.log(JSON.stringify(executionResult[0], null, 2));
-            }
-            console.log('═'.repeat(80));
-          } else {
-            console.error('\n❌ VALIDATION FAILED (Phase 2):');
-            console.error(`Reason: ${refinedValidation.reason}`);
-            console.error(`SQL: ${refinedSQL}`);
-            console.log('⚠️  Using Phase 1 results instead');
-          }
-        }
-      } catch (refinementError) {
-        console.error('\n❌ Refinement error:', refinementError.message);
-        console.log('⚠️  Using Phase 1 results instead');
-      }
-    }
-    
-    // Step 7: Call NLP service for formatting
-    console.log('\n📝 Step 7: Formatting response...');
+    // Step 5: Deterministic formatting
+    console.log('\n📝 Step 5: Formatting response...');
     let formattedResponse;
     
-    try {
-      const formattingResponse = await callNLP('formatting', {
-        original_query: userQuery,
-        final_data: executionResult
-      });
-      
-      console.log('\n' + '═'.repeat(80));
-      console.log('✨ FORMATTING RESPONSE');
-      console.log('═'.repeat(80));
-      console.log(JSON.stringify(formattingResponse, null, 2));
-      console.log('═'.repeat(80));
-      
-      formattedResponse = formattingResponse.formatted_text || formattingResponse.response || formattingResponse.summary;
-      console.log('\n✓ Response formatted successfully');
-      
-    } catch (formattingError) {
-      console.log('⚠️  Formatting failed, using default message');
-      formattedResponse = `Found ${executionResult.length} result(s) for your query.`;
+    if (executionResult.length === 0) {
+      formattedResponse = 'No matching records found.';
+      console.log('✓ Response: No results');
+    } else if (executionResult.length === 1 && Object.keys(executionResult[0]).length === 1) {
+      // Single row, single column - return the value directly
+      const value = Object.values(executionResult[0])[0];
+      formattedResponse = `${value}`;
+      console.log(`✓ Response: Single value: ${value}`);
+    } else if (executionResult.length === 1) {
+      // Single row, multiple columns - return as object
+      formattedResponse = JSON.stringify(executionResult[0]);
+      console.log('✓ Response: Single record');
+    } else {
+      // Multiple rows - return count and data summary
+      formattedResponse = `Found ${executionResult.length} result(s).`;
+      console.log(`✓ Response: ${executionResult.length} results`);
     }
     
-    // Step 8: Extract GeoJSON if available
+    // Step 6: Extract GeoJSON if available
     const geojson = extractGeoJSON(executionResult);
     
-    // Step 9: Return final structured response
+    // Step 7: Return final structured response
     const totalExecutionTime = Date.now() - startTime;
     console.log('\n✨ Query processing complete!');
     console.log(`⏱️  Total execution time: ${totalExecutionTime}ms\n`);

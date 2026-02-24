@@ -7,6 +7,77 @@ from app.services.prompt_builder import (
     PromptBuilder
 )
 from app.services.response_parser import ResponseParser
+from app.models.query_plan import QueryPlan
+from app.models.sql_builder import build_sql
+
+
+def parse_schema(schema_text: str) -> Dict[str, Dict[str, Any]]:
+    """
+    Parse schema text to extract tables and columns
+    
+    Args:
+        schema_text: Schema description text
+        
+    Returns:
+        Dictionary mapping table names to their column lists
+    """
+    schema_cache = {}
+    lines = schema_text.split('\n')
+    current_table = None
+    
+    for line in lines:
+        line = line.strip()
+        
+        # Detect table line
+        if line.startswith('Table: '):
+            table_name = line.replace('Table: ', '').strip().strip('"')
+            current_table = table_name
+            schema_cache[current_table] = {"columns": []}
+        
+        # Detect column line (starts with dash or contains "Column:")
+        elif current_table and ('Column:' in line or line.startswith('-')):
+            # Extract column name (before colon or parenthesis)
+            if 'Column:' in line:
+                col_part = line.split('Column:')[1].strip()
+            else:
+                col_part = line.lstrip('- ').strip()
+            
+            # Get the column name (first word, remove quotes)
+            col_name = col_part.split()[0].strip('"').strip(',').strip(':')
+            if col_name:
+                schema_cache[current_table]["columns"].append(col_name)
+    
+    return schema_cache
+
+
+def validate_plan(plan: QueryPlan, schema_cache: Dict[str, Dict[str, Any]]):
+    """
+    Validate query plan against schema cache
+    
+    Args:
+        plan: QueryPlan to validate
+        schema_cache: Schema cache with table and column info
+        
+    Raises:
+        ValueError: If plan contains invalid table or columns
+    """
+    if plan.table not in schema_cache:
+        raise ValueError(f"Invalid table in plan: {plan.table}")
+    
+    table_columns = schema_cache[plan.table]["columns"]
+    
+    for col in plan.columns:
+        if col not in table_columns:
+            raise ValueError(f"Invalid column: {col} not in table {plan.table}")
+    
+    for cond in plan.conditions:
+        if cond.column not in table_columns:
+            raise ValueError(f"Invalid condition column: {cond.column} not in table {plan.table}")
+    
+    for agg in plan.aggregations:
+        if agg.column not in table_columns:
+            raise ValueError(f"Invalid aggregation column: {agg.column} not in table {plan.table}")
+
 
 def handle_mode(mode: str, payload: dict) -> dict:
     """
@@ -34,7 +105,28 @@ def handle_mode(mode: str, payload: dict) -> dict:
         
         try:
             parsed = ResponseParser.extract_json_from_response(raw_text)
-            return parsed
+            print(f"📋 Planning JSON parsed successfully:\n{parsed}\n")
+            
+            # Create QueryPlan from parsed JSON
+            plan = QueryPlan(**parsed)
+            print(f"✓ QueryPlan created: {plan}\n")
+            
+            # Parse schema and validate plan
+            schema_cache = parse_schema(schema)
+            print(f"📊 Parsed schema: {len(schema_cache)} tables\n")
+            
+            validate_plan(plan, schema_cache)
+            print(f"✅ Plan validation passed\n")
+            
+            # Build SQL from QueryPlan
+            generated_sql = build_sql(plan)
+            print(f"🔨 Generated SQL:\n{generated_sql}\n")
+            
+            # Return SQL and plan data
+            return {
+                "sql": generated_sql,
+                "plan": parsed
+            }
         except Exception as e:
             print(f"❌ Failed to parse JSON from LLM response: {str(e)}")
             raise Exception(f"Failed to parse LLM response as JSON: {str(e)}")

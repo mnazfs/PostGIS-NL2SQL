@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { QueryPanel } from './components/QueryPanel.tsx';
 import { SchemaAccordion } from './components/SchemaAccordion';
 import { Sidebar } from './components/Sidebar';
-import { fetchSystemStatus, fetchSchema } from './services/api';
+import { fetchSystemStatus, fetchSchema } from './services/api.ts';
 import type { AgentConfig } from './types/chat';
 import type { TableSchema } from './types/query';
 
