@@ -3,7 +3,7 @@ import json
 import requests
 from typing import Dict
 from app import config
-from app.main import get_vector_store
+from app.rag.vector_store_instance import get_vector_store
 
 
 def generate_rag_answer(query: str) -> dict:

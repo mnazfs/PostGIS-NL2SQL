@@ -2,12 +2,18 @@ import { BACKEND_URL } from '../config';
 import type { QueryResult, SystemStatusResponse, SchemaResponse } from '../types/query';
 
 interface BackendResponse {
-  success: boolean;
-  message?: string;
-  summary?: string;
-  sql?: string;
-  rows?: Array<Record<string, any>>;
-  geojson?: any;
+  intent: string;
+  source: string;
+  answer: {
+    success: boolean;
+    message?: string;
+    summary?: string;
+    sql?: string;
+    rows?: Array<Record<string, any>>;
+    geojson?: any;
+    error?: string;
+    execution_time_ms?: number;
+  };
 }
 
 /**
@@ -38,15 +44,16 @@ export async function sendQuery(query: string, selectedTable?: string): Promise<
 
     const data: BackendResponse = await response.json();
 
-    if (data.success === false) {
-      throw new Error(data.message || 'Query execution failed');
+    // Handle new return structure with answer nested
+    if (data.answer?.success === false) {
+      throw new Error(data.answer?.message || data.answer?.error || 'Query execution failed');
     }
 
     return {
-      summary: data.summary,
-      sql: data.sql,
-      rows: data.rows,
-      geojson: data.geojson,
+      summary: data.answer?.summary,
+      sql: data.answer?.sql,
+      rows: data.answer?.rows,
+      geojson: data.answer?.geojson,
     };
   } catch (error) {
     if (error instanceof TypeError && error.message.includes('fetch')) {

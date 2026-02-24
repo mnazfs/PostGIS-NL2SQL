@@ -37,8 +37,9 @@ router.post('/', async (req, res) => {
     // Process the query through the agent orchestrator
     const result = await handleUserQuery(query.trim(), selectedTable);
 
-    // Return the result (success or error handled by handleUserQuery)
-    const statusCode = result.success ? 200 : 500;
+    // Handle new return structure: { intent, source, answer: { success, ... } }
+    const success = result.answer?.success !== false;
+    const statusCode = success ? 200 : 500;
     res.status(statusCode).json(result);
 
   } catch (error) {
